@@ -37,7 +37,10 @@ class MainActivity : ComponentActivity() {
                 Uri.parse("package:$packageName")
             )
             startActivity(intent)
+            return
         }
+
+        startService(Intent(this, FloatingWindowService::class.java))
     }
 
 
