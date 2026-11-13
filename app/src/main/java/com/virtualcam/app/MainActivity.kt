@@ -1,5 +1,7 @@
 package com.virtualcam.app
 
+import android.app.AppOpsManager
+import android.provider.Settings
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -25,6 +27,20 @@ import androidx.media3.ui.PlayerView
 import androidx.media3.ui.AspectRatioFrameLayout
 
 class MainActivity : ComponentActivity() {
+
+    private fun requestOverlayPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+            !Settings.canDrawOverlays(this)
+        ) {
+            val intent = Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:$packageName")
+            )
+            startActivity(intent)
+        }
+    }
+
+
 
     private var player: ExoPlayer? = null
     private var selectedVideo: Uri? = null
@@ -153,6 +169,7 @@ class MainActivity : ComponentActivity() {
         addModeButton(modeRow, "جنباً إلى جنب") { showMode("side") }
         addModeButton(modeRow, "فوق وتحت") { showMode("vertical") }
         addModeButton(modeRow, "نافذة صغيرة") { showMode("pip") }
+        addModeButton(modeRow, "تفعيل النافذة العائمة") { requestOverlayPermission() }
 
         modeScroll.addView(modeRow)
         main.addView(modeScroll)
