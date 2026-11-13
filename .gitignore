@@ -3,3 +3,4 @@
 local.properties
 *.iml
 app/src/main/java/com/virtualcam/app/MainActivity.kt.bak
+app/src/main/java/com/virtualcam/app/ScreenCaptureService.kt.bak

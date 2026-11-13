@@ -10,11 +10,13 @@ import android.content.pm.ServiceInfo
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.ImageReader
+import android.graphics.Bitmap
 import android.graphics.PixelFormat
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
 import android.util.Log
 
 class ScreenCaptureService : Service() {
@@ -22,6 +24,7 @@ class ScreenCaptureService : Service() {
     private var projection: MediaProjection? = null
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
+    private var lastFrameTimeMs = 0L
 
     companion object {
         const val EXTRA_RESULT_CODE = "result_code"
@@ -106,7 +109,47 @@ class ScreenCaptureService : Service() {
 
         reader.setOnImageAvailableListener({ source ->
             val image = source.acquireLatestImage()
-            image?.close()
+                ?: return@setOnImageAvailableListener
+
+            try {
+                val now = SystemClock.elapsedRealtime()
+                if (now - lastFrameTimeMs >= 100) {
+                    lastFrameTimeMs = now
+
+                    val plane = image.planes[0]
+                    val pixelStride = plane.pixelStride
+                    val rowStride = plane.rowStride
+                    val paddedWidth = rowStride / pixelStride
+
+                    val paddedBitmap = Bitmap.createBitmap(
+                        paddedWidth,
+                        height,
+                        Bitmap.Config.ARGB_8888
+                    )
+
+                    paddedBitmap.copyPixelsFromBuffer(plane.buffer)
+
+                    val frame = if (paddedWidth > width) {
+                        Bitmap.createBitmap(paddedBitmap, 0, 0, width, height)
+                    } else {
+                        paddedBitmap
+                    }
+
+                    if (frame !== paddedBitmap) {
+                        paddedBitmap.recycle()
+                    }
+
+                    if (ScreenFrameBus.onFrame != null) {
+                        ScreenFrameBus.send(frame)
+                    } else {
+                        frame.recycle()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("VirtualCam", "Frame conversion failed", e)
+            } finally {
+                image.close()
+            }
         }, null)
 
         screenProjection.registerCallback(

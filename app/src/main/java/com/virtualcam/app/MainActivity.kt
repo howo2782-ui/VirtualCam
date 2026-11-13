@@ -35,6 +35,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var contentFrame: FrameLayout
     private lateinit var status: TextView
     private lateinit var screenMessage: TextView
+    private lateinit var screenView: ImageView
+    private var displayedScreenBitmap: android.graphics.Bitmap? = null
     private lateinit var playButton: Button
 
     private val videoPicker =
@@ -85,6 +87,22 @@ class MainActivity : ComponentActivity() {
         window.navigationBarColor = Color.rgb(13, 16, 28)
 
         buildInterface()
+
+        ScreenFrameBus.onFrame = { bitmap ->
+            if (!isFinishing && !isDestroyed) {
+                val oldBitmap = displayedScreenBitmap
+                displayedScreenBitmap = bitmap
+                screenView.setImageBitmap(bitmap)
+
+                if (oldBitmap != null && oldBitmap !== bitmap && !oldBitmap.isRecycled) {
+                    oldBitmap.recycle()
+                }
+                screenMessage.text = "يتم عرض الشاشة الملتقطة"
+            } else {
+                bitmap.recycle()
+            }
+        }
+
         initializePlayer()
 
         if (ContextCompat.checkSelfPermission(
@@ -160,6 +178,11 @@ class MainActivity : ComponentActivity() {
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
             setPadding(dp(18), dp(18), dp(18), dp(18))
+        }
+
+        screenView = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setBackgroundColor(Color.BLACK)
         }
 
         main.addView(
@@ -310,8 +333,8 @@ class MainActivity : ComponentActivity() {
             }
 
             "screen" -> {
-                contentFrame.addView(screenMessage, full)
-                status.text = "وضع التقاط الشاشة فقط"
+                contentFrame.addView(screenView, full)
+                status.text = "عرض الشاشة الملتقطة"
             }
 
             "pip" -> {
@@ -393,6 +416,14 @@ class MainActivity : ComponentActivity() {
         (value * resources.displayMetrics.density).toInt()
 
     override fun onDestroy() {
+        ScreenFrameBus.clear()
+        screenView.setImageDrawable(null)
+
+        displayedScreenBitmap?.let {
+            if (!it.isRecycled) it.recycle()
+        }
+        displayedScreenBitmap = null
+
         playerView.player = null
         player?.release()
         player = null
