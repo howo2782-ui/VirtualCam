@@ -9,26 +9,37 @@ import android.os.IBinder
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.WindowManager
-import android.widget.TextView
+import android.widget.FrameLayout
+import androidx.camera.view.PreviewView
 import kotlin.math.abs
 
 class FloatingWindowService : Service() {
 
     private lateinit var windowManager: WindowManager
-    private var floatingView: TextView? = null
+    private var floatingView: FrameLayout? = null
+    private var overlayPreview: PreviewView? = null
 
     override fun onCreate() {
         super.onCreate()
 
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
 
-        val view = TextView(this).apply {
-            text = "VirtualCam\nاسحب لتحريكي\nاضغط للإغلاق"
-            textSize = 14f
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.DKGRAY)
-            setPadding(24, 20, 24, 20)
+        val root = FrameLayout(this).apply {
+            setBackgroundColor(Color.BLACK)
         }
+
+        val preview = PreviewView(this).apply {
+            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+            scaleType = PreviewView.ScaleType.FILL_CENTER
+        }
+
+        root.addView(
+            preview,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
 
         val windowType =
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
@@ -37,8 +48,8 @@ class FloatingWindowService : Service() {
                 WindowManager.LayoutParams.TYPE_PHONE
 
         val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
+            300,
+            400,
             windowType,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
@@ -54,7 +65,7 @@ class FloatingWindowService : Service() {
         var touchY = 0f
         var moved = false
 
-        view.setOnTouchListener { _, event ->
+        root.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     startX = params.x
@@ -75,7 +86,7 @@ class FloatingWindowService : Service() {
 
                     params.x = startX + dx.toInt()
                     params.y = startY + dy.toInt()
-                    windowManager.updateViewLayout(view, params)
+                    windowManager.updateViewLayout(root, params)
                     true
                 }
 
@@ -88,11 +99,18 @@ class FloatingWindowService : Service() {
             }
         }
 
-        floatingView = view
-        windowManager.addView(view, params)
+        floatingView = root
+        overlayPreview = preview
+        windowManager.addView(root, params)
+
+        CameraPreviewBus.requestPreview(preview)
     }
 
     override fun onDestroy() {
+        overlayPreview?.let {
+            CameraPreviewBus.clearPreview(it)
+        }
+
         floatingView?.let {
             try {
                 windowManager.removeView(it)
@@ -100,6 +118,8 @@ class FloatingWindowService : Service() {
                 android.util.Log.e("VirtualCam", "Window removal failed", e)
             }
         }
+
+        overlayPreview = null
         floatingView = null
         super.onDestroy()
     }

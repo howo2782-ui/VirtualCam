@@ -48,6 +48,18 @@ class MainActivity : ComponentActivity() {
     private var player: ExoPlayer? = null
     private var selectedVideo: Uri? = null
     private var cameraProvider: ProcessCameraProvider? = null
+    private var cameraPreview: Preview? = null
+
+    private fun connectCameraPreviewBus() {
+        CameraPreviewBus.onPreviewRequested = { view ->
+            cameraPreview?.surfaceProvider = view.surfaceProvider
+        }
+
+        CameraPreviewBus.onPreviewReleased = {
+            cameraPreview?.surfaceProvider = cameraView.surfaceProvider
+        }
+    }
+
 
     private lateinit var cameraView: PreviewView
     private lateinit var playerView: PlayerView
@@ -106,6 +118,7 @@ class MainActivity : ComponentActivity() {
         window.navigationBarColor = Color.rgb(13, 16, 28)
 
         buildInterface()
+        connectCameraPreviewBus()
 
         ScreenFrameBus.onFrame = { bitmap ->
             if (!isFinishing && !isDestroyed) {
@@ -392,9 +405,11 @@ class MainActivity : ComponentActivity() {
                 val provider = future.get()
                 cameraProvider = provider
 
-                val preview = Preview.Builder().build().also {
-                    it.surfaceProvider = cameraView.surfaceProvider
-                }
+                val preview = Preview.Builder().build()
+                cameraPreview = preview
+                preview.surfaceProvider =
+                    CameraPreviewBus.overlayPreview?.surfaceProvider
+                        ?: cameraView.surfaceProvider
 
                 provider.unbindAll()
                 provider.bindToLifecycle(
@@ -447,6 +462,11 @@ class MainActivity : ComponentActivity() {
         playerView.player = null
         player?.release()
         player = null
+        CameraPreviewBus.onPreviewRequested = null
+        CameraPreviewBus.onPreviewReleased = null
+        CameraPreviewBus.overlayPreview = null
+
+        cameraPreview = null
         cameraProvider?.unbindAll()
         cameraProvider = null
         super.onDestroy()
