@@ -84,6 +84,11 @@ class ScreenCaptureService : Service() {
                 as MediaProjectionManager
 
         val screenProjection = manager.getMediaProjection(resultCode, resultData)
+            ?: run {
+                Log.e("VirtualCam", "MediaProjection returned null")
+                stopSelf()
+                return
+            }
         projection = screenProjection
 
         val metrics = resources.displayMetrics
