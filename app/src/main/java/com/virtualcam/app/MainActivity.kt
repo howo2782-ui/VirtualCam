@@ -1,210 +1,403 @@
 package com.virtualcam.app
 
-import android.app.Activity
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
+import android.widget.*
 import android.view.View
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.TextView
-import android.widget.Toast
+import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.AspectRatioFrameLayout
 
 class MainActivity : ComponentActivity() {
 
     private var player: ExoPlayer? = null
     private var selectedVideo: Uri? = null
+    private var cameraProvider: ProcessCameraProvider? = null
+
+    private lateinit var cameraView: PreviewView
     private lateinit var playerView: PlayerView
-    private lateinit var statusText: TextView
+    private lateinit var contentFrame: FrameLayout
+    private lateinit var status: TextView
+    private lateinit var screenMessage: TextView
     private lateinit var playButton: Button
-    private var looping = true
 
     private val videoPicker =
         registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
             if (uri != null) {
                 selectedVideo = uri
-                playVideo(uri)
-                statusText.text = "تم اختيار الفيديو بنجاح"
+                player?.setMediaItem(MediaItem.fromUri(uri))
+                player?.prepare()
+                player?.play()
+                playButton.text = "Ⅱ إيقاف الفيديو"
+                status.text = "تم اختيار الفيديو"
+            }
+        }
+
+    private val cameraPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) startCamera()
+            else status.text = "لم يتم السماح باستخدام الكاميرا"
+        }
+
+    private val screenPermission =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == RESULT_OK && result.data != null) {
+                val serviceIntent = Intent(this, ScreenCaptureService::class.java).apply {
+                    putExtra(ScreenCaptureService.EXTRA_RESULT_CODE, result.resultCode)
+                    putExtra(ScreenCaptureService.EXTRA_RESULT_DATA, result.data)
+                }
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(serviceIntent)
+                } else {
+                    startService(serviceIntent)
+                }
+
+                status.text = "بدأ التقاط الشاشة للاختبار"
+                showMode("screen")
+                screenMessage.text =
+                    "التقاط الشاشة يعمل في الخلفية.\nعرض الصورة الملتقطة ودمجها مع الكاميرا سيضاف في المرحلة التالية."
+            } else {
+                status.text = "تم إلغاء التقاط الشاشة"
             }
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         window.statusBarColor = Color.rgb(13, 16, 28)
         window.navigationBarColor = Color.rgb(13, 16, 28)
-        window.decorView.systemUiVisibility = 0
-        buildScreen()
+
+        buildInterface()
         initializePlayer()
+
+        if (ContextCompat.checkSelfPermission(
+                this, Manifest.permission.CAMERA
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
+            startCamera()
+        } else {
+            cameraPermission.launch(Manifest.permission.CAMERA)
+        }
     }
 
-    private fun buildScreen() {
-        val background = Color.rgb(13, 16, 28)
-        val accent = Color.rgb(108, 92, 231)
-
+    private fun buildInterface() {
         val main = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(22), dp(18), dp(18))
-            setBackgroundColor(background)
+            setPadding(dp(10), dp(10), dp(10), dp(8))
+            setBackgroundColor(Color.rgb(13, 16, 28))
         }
 
         val title = TextView(this).apply {
-            text = "VirtualCam"
-            textSize = 28f
+            text = "VirtualCam V2"
+            textSize = 24f
+            gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
-            gravity = Gravity.CENTER
         }
-        main.addView(title, matchWrap())
+        main.addView(title)
 
-        val subtitle = TextView(this).apply {
-            text = "كاميرتك الافتراضية — بدون Root"
-            textSize = 14f
-            setTextColor(Color.LTGRAY)
+        status = TextView(this).apply {
+            text = "اختر وضع العرض"
+            textSize = 13f
             gravity = Gravity.CENTER
-            setPadding(0, dp(5), 0, dp(18))
+            setTextColor(Color.LTGRAY)
+            setPadding(0, dp(7), 0, dp(7))
         }
-        main.addView(subtitle, matchWrap())
+        main.addView(status)
+
+        val modeScroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+        }
+
+        val modeRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+        }
+
+        addModeButton(modeRow, "كاميرا فقط") { showMode("camera") }
+        addModeButton(modeRow, "شاشة فقط") { requestScreenCapture() }
+        addModeButton(modeRow, "فيديو فقط") { showMode("video") }
+        addModeButton(modeRow, "جنباً إلى جنب") { showMode("side") }
+        addModeButton(modeRow, "فوق وتحت") { showMode("vertical") }
+        addModeButton(modeRow, "نافذة صغيرة") { showMode("pip") }
+
+        modeScroll.addView(modeRow)
+        main.addView(modeScroll)
+
+        contentFrame = FrameLayout(this).apply {
+            setBackgroundColor(Color.BLACK)
+        }
+
+        cameraView = PreviewView(this).apply {
+            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+            scaleType = PreviewView.ScaleType.FILL_CENTER
+        }
 
         playerView = PlayerView(this).apply {
             useController = true
             resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
             setBackgroundColor(Color.BLACK)
         }
+
+        screenMessage = TextView(this).apply {
+            text = "اختر وضع العرض"
+            textSize = 17f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            setPadding(dp(18), dp(18), dp(18), dp(18))
+        }
+
         main.addView(
-            playerView,
+            contentFrame,
             LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
             ).apply {
-                bottomMargin = dp(14)
+                topMargin = dp(10)
+                bottomMargin = dp(10)
             }
         )
 
-        statusText = TextView(this).apply {
-            text = "اختر فيديو من هاتفك للبدء"
-            textSize = 14f
-            setTextColor(Color.LTGRAY)
-            gravity = Gravity.CENTER
-            setPadding(0, dp(8), 0, dp(12))
+        val importButton = makeButton("＋ اختيار فيديو")
+        importButton.setOnClickListener {
+            videoPicker.launch("video/*")
         }
-        main.addView(statusText, matchWrap())
+        main.addView(importButton)
 
-        val importButton = makeButton("＋  اختيار فيديو", accent)
-        importButton.setOnClickListener { videoPicker.launch("video/*") }
-        main.addView(importButton, buttonParams())
-
-        playButton = makeButton("▶  تشغيل", Color.rgb(42, 48, 68))
+        playButton = makeButton("▶ تشغيل / إيقاف الفيديو")
         playButton.setOnClickListener {
             val p = player
             if (p == null || selectedVideo == null) {
                 Toast.makeText(this, "اختر فيديو أولاً", Toast.LENGTH_SHORT).show()
             } else if (p.isPlaying) {
                 p.pause()
-                playButton.text = "▶  تشغيل"
+                playButton.text = "▶ تشغيل الفيديو"
             } else {
                 p.play()
-                playButton.text = "Ⅱ  إيقاف مؤقت"
+                playButton.text = "Ⅱ إيقاف الفيديو"
             }
         }
-        main.addView(playButton, buttonParams())
+        main.addView(playButton)
 
-        val loopButton = makeButton("تكرار الفيديو: مفعّل", Color.rgb(42, 48, 68))
-        loopButton.setOnClickListener {
-            looping = !looping
-            player?.repeatMode = if (looping) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
-            loopButton.text = if (looping) "تكرار الفيديو: مفعّل" else "تكرار الفيديو: متوقف"
+        val captureButton = makeButton("بدء التقاط الشاشة")
+        captureButton.setOnClickListener { requestScreenCapture() }
+        main.addView(captureButton)
+
+        val stopCaptureButton = makeButton("إيقاف التقاط الشاشة")
+        stopCaptureButton.setOnClickListener {
+            stopService(Intent(this, ScreenCaptureService::class.java))
+            status.text = "تم إيقاف التقاط الشاشة"
         }
-        main.addView(loopButton, buttonParams())
-
-        val shareButton = makeButton("مشاركة الفيديو إلى TikTok", Color.rgb(0, 160, 150))
-        shareButton.setOnClickListener { shareVideo() }
-        main.addView(shareButton, buttonParams())
-
-        val note = TextView(this).apply {
-            text = "ملاحظة: هذه النسخة تشغّل الفيديو داخل VirtualCam وتشاركه إلى TikTok. لا تستبدل كاميرا TikTok مباشرة."
-            textSize = 11f
-            setTextColor(Color.GRAY)
-            gravity = Gravity.CENTER
-            setPadding(0, dp(10), 0, 0)
-        }
-        main.addView(note, matchWrap())
+        main.addView(stopCaptureButton)
 
         setContentView(main)
+        showMode("side")
+    }
+
+    private fun addModeButton(
+        row: LinearLayout,
+        label: String,
+        action: () -> Unit
+    ) {
+        val button = Button(this).apply {
+            text = label
+            textSize = 12f
+            isAllCaps = false
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.rgb(55, 62, 85))
+            setOnClickListener { action() }
+        }
+
+        row.addView(
+            button,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                dp(46)
+            ).apply {
+                marginEnd = dp(5)
+            }
+        )
+    }
+
+    private fun showMode(mode: String) {
+        contentFrame.removeAllViews()
+
+        val full = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
+        )
+
+        when (mode) {
+            "camera" -> {
+                contentFrame.addView(cameraView, full)
+                status.text = "وضع الكاميرا فقط"
+            }
+
+            "video" -> {
+                contentFrame.addView(playerView, full)
+                status.text = "وضع الفيديو فقط"
+            }
+
+            "side" -> {
+                contentFrame.addView(
+                    cameraView,
+                    FrameLayout.LayoutParams(
+                        0,
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        Gravity.START
+                    ).apply {
+                        width = contentFrame.width / 2
+                    }
+                )
+
+                contentFrame.post {
+                    contentFrame.removeAllViews()
+                    contentFrame.addView(
+                        cameraView,
+                        FrameLayout.LayoutParams(
+                            contentFrame.width / 2,
+                            FrameLayout.LayoutParams.MATCH_PARENT,
+                            Gravity.START
+                        )
+                    )
+                    contentFrame.addView(
+                        playerView,
+                        FrameLayout.LayoutParams(
+                            contentFrame.width / 2,
+                            FrameLayout.LayoutParams.MATCH_PARENT,
+                            Gravity.END
+                        )
+                    )
+                }
+                status.text = "الكاميرا والفيديو جنباً إلى جنب"
+            }
+
+            "vertical" -> {
+                contentFrame.post {
+                    contentFrame.removeAllViews()
+                    contentFrame.addView(
+                        cameraView,
+                        FrameLayout.LayoutParams(
+                            FrameLayout.LayoutParams.MATCH_PARENT,
+                            contentFrame.height / 2,
+                            Gravity.TOP
+                        )
+                    )
+                    contentFrame.addView(
+                        playerView,
+                        FrameLayout.LayoutParams(
+                            FrameLayout.LayoutParams.MATCH_PARENT,
+                            contentFrame.height / 2,
+                            Gravity.BOTTOM
+                        )
+                    )
+                }
+                status.text = "الكاميرا والفيديو فوق وتحت"
+            }
+
+            "screen" -> {
+                contentFrame.addView(screenMessage, full)
+                status.text = "وضع التقاط الشاشة فقط"
+            }
+
+            "pip" -> {
+                contentFrame.addView(playerView, full)
+                contentFrame.addView(
+                    cameraView,
+                    FrameLayout.LayoutParams(
+                        dp(125),
+                        dp(175),
+                        Gravity.TOP or Gravity.END
+                    ).apply {
+                        setMargins(dp(8), dp(8), dp(8), dp(8))
+                    }
+                )
+                status.text = "الفيديو كبير والكاميرا نافذة صغيرة"
+            }
+
+            else -> {
+                contentFrame.addView(screenMessage, full)
+            }
+        }
+    }
+
+    private fun requestScreenCapture() {
+        val manager = getSystemService(MEDIA_PROJECTION_SERVICE)
+                as android.media.projection.MediaProjectionManager
+        screenPermission.launch(manager.createScreenCaptureIntent())
+    }
+
+    private fun startCamera() {
+        val future = ProcessCameraProvider.getInstance(this)
+
+        future.addListener({
+            try {
+                val provider = future.get()
+                cameraProvider = provider
+
+                val preview = Preview.Builder().build().also {
+                    it.surfaceProvider = cameraView.surfaceProvider
+                }
+
+                provider.unbindAll()
+                provider.bindToLifecycle(
+                    this,
+                    CameraSelector.DEFAULT_FRONT_CAMERA,
+                    preview
+                )
+
+                status.text = "كاميرا الهاتف جاهزة"
+            } catch (e: Exception) {
+                status.text = "تعذر تشغيل الكاميرا: ${e.message}"
+            }
+        }, ContextCompat.getMainExecutor(this))
     }
 
     private fun initializePlayer() {
-        player = ExoPlayer.Builder(this).build().also { exo ->
-            playerView.player = exo
-            exo.repeatMode = if (looping) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
-            exo.addListener(object : Player.Listener {
-                override fun onPlaybackStateChanged(playbackState: Int) {
-                    if (playbackState == Player.STATE_ENDED) {
-                        playButton.text = "▶  تشغيل"
-                    }
-                }
-            })
+        player = ExoPlayer.Builder(this).build().also {
+            playerView.player = it
+            it.repeatMode = Player.REPEAT_MODE_ONE
         }
     }
 
-    private fun playVideo(uri: Uri) {
-        val exo = player ?: return
-        exo.setMediaItem(MediaItem.fromUri(uri))
-        exo.prepare()
-        exo.play()
-        playButton.text = "Ⅱ  إيقاف مؤقت"
-    }
-
-    private fun shareVideo() {
-        val uri = selectedVideo
-        if (uri == null) {
-            Toast.makeText(this, "اختر فيديو أولاً", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "video/*"
-            putExtra(Intent.EXTRA_STREAM, uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        startActivity(Intent.createChooser(intent, "مشاركة الفيديو"))
-    }
-
-    private fun makeButton(label: String, color: Int) =
+    private fun makeButton(label: String) =
         Button(this).apply {
             text = label
-            textSize = 15f
+            textSize = 13f
             isAllCaps = false
             setTextColor(Color.WHITE)
-            setBackgroundColor(color)
+            setBackgroundColor(Color.rgb(48, 57, 82))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(45)
+            ).apply {
+                bottomMargin = dp(5)
+            }
         }
-
-    private fun buttonParams() = LinearLayout.LayoutParams(
-        LinearLayout.LayoutParams.MATCH_PARENT, dp(52)
-    ).apply { bottomMargin = dp(9) }
-
-    private fun matchWrap() = LinearLayout.LayoutParams(
-        LinearLayout.LayoutParams.MATCH_PARENT,
-        LinearLayout.LayoutParams.WRAP_CONTENT
-    )
 
     private fun dp(value: Int): Int =
         (value * resources.displayMetrics.density).toInt()
-
-    override fun onStop() {
-        super.onStop()
-        player?.pause()
-    }
 
     override fun onDestroy() {
         playerView.player = null
         player?.release()
         player = null
+        cameraProvider?.unbindAll()
+        cameraProvider = null
         super.onDestroy()
     }
 }
