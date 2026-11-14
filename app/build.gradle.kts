@@ -26,6 +26,7 @@ android {
 }
 
 dependencies {
+    implementation("androidx.lifecycle:lifecycle-service:2.9.4")
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.activity:activity-ktx:1.11.0")
     implementation("androidx.media3:media3-exoplayer:1.11.1")

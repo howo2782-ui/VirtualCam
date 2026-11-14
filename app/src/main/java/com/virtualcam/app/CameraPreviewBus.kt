@@ -5,6 +5,9 @@ import androidx.camera.view.PreviewView
 object CameraPreviewBus {
 
     @Volatile
+    var mainPreview: PreviewView? = null
+
+    @Volatile
     var overlayPreview: PreviewView? = null
 
     @Volatile

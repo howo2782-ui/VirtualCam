@@ -15,9 +15,6 @@ import android.view.View
 import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.Preview
-import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
@@ -47,19 +44,6 @@ class MainActivity : ComponentActivity() {
 
     private var player: ExoPlayer? = null
     private var selectedVideo: Uri? = null
-    private var cameraProvider: ProcessCameraProvider? = null
-    private var cameraPreview: Preview? = null
-
-    private fun connectCameraPreviewBus() {
-        CameraPreviewBus.onPreviewRequested = { view ->
-            cameraPreview?.surfaceProvider = view.surfaceProvider
-        }
-
-        CameraPreviewBus.onPreviewReleased = {
-            cameraPreview?.surfaceProvider = cameraView.surfaceProvider
-        }
-    }
-
 
     private lateinit var cameraView: PreviewView
     private lateinit var playerView: PlayerView
@@ -84,7 +68,7 @@ class MainActivity : ComponentActivity() {
 
     private val cameraPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            if (granted) startCamera()
+            if (granted) startCameraService()
             else status.text = "لم يتم السماح باستخدام الكاميرا"
         }
 
@@ -118,7 +102,7 @@ class MainActivity : ComponentActivity() {
         window.navigationBarColor = Color.rgb(13, 16, 28)
 
         buildInterface()
-        connectCameraPreviewBus()
+        CameraPreviewBus.mainPreview = cameraView
 
         ScreenFrameBus.onFrame = { bitmap ->
             if (!isFinishing && !isDestroyed) {
@@ -141,7 +125,7 @@ class MainActivity : ComponentActivity() {
                 this, Manifest.permission.CAMERA
             ) == PackageManager.PERMISSION_GRANTED
         ) {
-            startCamera()
+            startCameraService()
         } else {
             cameraPermission.launch(Manifest.permission.CAMERA)
         }
@@ -397,32 +381,20 @@ class MainActivity : ComponentActivity() {
         screenPermission.launch(manager.createScreenCaptureIntent())
     }
 
-    private fun startCamera() {
-        val future = ProcessCameraProvider.getInstance(this)
+    private fun startCameraService() {
+        try {
+            val intent = Intent(this, CameraForegroundService::class.java)
 
-        future.addListener({
-            try {
-                val provider = future.get()
-                cameraProvider = provider
-
-                val preview = Preview.Builder().build()
-                cameraPreview = preview
-                preview.surfaceProvider =
-                    CameraPreviewBus.overlayPreview?.surfaceProvider
-                        ?: cameraView.surfaceProvider
-
-                provider.unbindAll()
-                provider.bindToLifecycle(
-                    this,
-                    CameraSelector.DEFAULT_FRONT_CAMERA,
-                    preview
-                )
-
-                status.text = "كاميرا الهاتف جاهزة"
-            } catch (e: Exception) {
-                status.text = "تعذر تشغيل الكاميرا: ${e.message}"
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                ContextCompat.startForegroundService(this, intent)
+            } else {
+                startService(intent)
             }
-        }, ContextCompat.getMainExecutor(this))
+
+            status.text = "جاري تشغيل خدمة الكاميرا"
+        } catch (e: Exception) {
+            status.text = "تعذر تشغيل خدمة الكاميرا: ${e.message}"
+        }
     }
 
     private fun initializePlayer() {
@@ -462,13 +434,9 @@ class MainActivity : ComponentActivity() {
         playerView.player = null
         player?.release()
         player = null
-        CameraPreviewBus.onPreviewRequested = null
-        CameraPreviewBus.onPreviewReleased = null
-        CameraPreviewBus.overlayPreview = null
-
-        cameraPreview = null
-        cameraProvider?.unbindAll()
-        cameraProvider = null
+        if (CameraPreviewBus.mainPreview === cameraView) {
+            CameraPreviewBus.mainPreview = null
+        }
         super.onDestroy()
     }
 }
