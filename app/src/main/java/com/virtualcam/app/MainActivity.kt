@@ -59,6 +59,8 @@ class MainActivity : ComponentActivity() {
     private var displayedScreenBitmap: android.graphics.Bitmap? = null
     private var latestCameraBitmap: android.graphics.Bitmap? = null
     private var displayedCompositeBitmap: android.graphics.Bitmap? = null
+    private var screenFrameCount = 0
+    private var lastScreenLogTime = 0L
     private lateinit var playButton: Button
 
     private val videoPicker =
@@ -114,6 +116,13 @@ class MainActivity : ComponentActivity() {
 
         ScreenFrameBus.onFrame = { bitmap ->
             if (!isFinishing && !isDestroyed) {
+                screenFrameCount++
+                val now = android.os.SystemClock.elapsedRealtime()
+                if (now - lastScreenLogTime >= 1000) {
+                    android.util.Log.d("VirtualCam", "Screen frames received: $screenFrameCount")
+                    screenFrameCount = 0
+                    lastScreenLogTime = now
+                }
                 val oldBitmap = displayedScreenBitmap
                 displayedScreenBitmap = bitmap
                 screenView.setImageBitmap(bitmap)
