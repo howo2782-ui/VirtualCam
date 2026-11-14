@@ -14,6 +14,9 @@ object CameraPreviewBus {
     var onPreviewRequested: ((PreviewView) -> Unit)? = null
 
     @Volatile
+    var onMainPreviewChanged: ((PreviewView) -> Unit)? = null
+
+    @Volatile
     var onPreviewReleased: (() -> Unit)? = null
 
     fun requestPreview(view: PreviewView) {

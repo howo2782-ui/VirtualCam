@@ -103,6 +103,7 @@ class MainActivity : ComponentActivity() {
 
         buildInterface()
         CameraPreviewBus.mainPreview = cameraView
+        CameraPreviewBus.onMainPreviewChanged?.invoke(cameraView)
 
         ScreenFrameBus.onFrame = { bitmap ->
             if (!isFinishing && !isDestroyed) {

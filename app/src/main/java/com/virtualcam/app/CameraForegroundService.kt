@@ -29,6 +29,12 @@ class CameraForegroundService : LifecycleService() {
             cameraPreview?.surfaceProvider = view.surfaceProvider
         }
 
+        CameraPreviewBus.onMainPreviewChanged = { view ->
+            if (CameraPreviewBus.overlayPreview == null) {
+                cameraPreview?.surfaceProvider = view.surfaceProvider
+            }
+        }
+
         CameraPreviewBus.onPreviewReleased = {
             cameraPreview?.surfaceProvider =
                 CameraPreviewBus.mainPreview?.surfaceProvider
@@ -101,6 +107,7 @@ class CameraForegroundService : LifecycleService() {
 
     override fun onDestroy() {
         CameraPreviewBus.onPreviewRequested = null
+        CameraPreviewBus.onMainPreviewChanged = null
         CameraPreviewBus.onPreviewReleased = null
 
         cameraProvider?.unbindAll()
