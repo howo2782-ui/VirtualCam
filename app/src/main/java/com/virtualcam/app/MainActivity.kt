@@ -6,6 +6,10 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Rect
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -51,7 +55,10 @@ class MainActivity : ComponentActivity() {
     private lateinit var status: TextView
     private lateinit var screenMessage: TextView
     private lateinit var screenView: ImageView
+    private lateinit var compositeView: ImageView
     private var displayedScreenBitmap: android.graphics.Bitmap? = null
+    private var latestCameraBitmap: android.graphics.Bitmap? = null
+    private var displayedCompositeBitmap: android.graphics.Bitmap? = null
     private lateinit var playButton: Button
 
     private val videoPicker =
@@ -115,6 +122,22 @@ class MainActivity : ComponentActivity() {
                     oldBitmap.recycle()
                 }
                 screenMessage.text = "يتم عرض الشاشة الملتقطة"
+                renderComposite()
+            } else {
+                bitmap.recycle()
+            }
+        }
+
+        CameraFrameBus.onFrame = { bitmap ->
+            if (!isFinishing && !isDestroyed) {
+                val oldBitmap = latestCameraBitmap
+                latestCameraBitmap = bitmap
+
+                if (oldBitmap != null && oldBitmap !== bitmap && !oldBitmap.isRecycled) {
+                    oldBitmap.recycle()
+                }
+
+                renderComposite()
             } else {
                 bitmap.recycle()
             }
@@ -170,6 +193,7 @@ class MainActivity : ComponentActivity() {
         addModeButton(modeRow, "جنباً إلى جنب") { showMode("side") }
         addModeButton(modeRow, "فوق وتحت") { showMode("vertical") }
         addModeButton(modeRow, "نافذة صغيرة") { showMode("pip") }
+        addModeButton(modeRow, "كاميرا + شاشة") { showMode("composite") }
         addModeButton(modeRow, "تفعيل النافذة العائمة") { requestOverlayPermission() }
 
         modeScroll.addView(modeRow)
@@ -199,6 +223,11 @@ class MainActivity : ComponentActivity() {
         }
 
         screenView = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setBackgroundColor(Color.BLACK)
+        }
+
+        compositeView = ImageView(this).apply {
             scaleType = ImageView.ScaleType.FIT_CENTER
             setBackgroundColor(Color.BLACK)
         }
@@ -350,6 +379,12 @@ class MainActivity : ComponentActivity() {
                 status.text = "الكاميرا والفيديو فوق وتحت"
             }
 
+            "composite" -> {
+                contentFrame.addView(compositeView, full)
+                status.text = "الكاميرا والشاشة مقسمتان إلى نصفين"
+                renderComposite()
+            }
+
             "screen" -> {
                 contentFrame.addView(screenView, full)
                 status.text = "عرض الشاشة الملتقطة"
@@ -374,6 +409,53 @@ class MainActivity : ComponentActivity() {
                 contentFrame.addView(screenMessage, full)
             }
         }
+    }
+
+    private fun renderComposite() {
+        if (!::compositeView.isInitialized || compositeView.parent == null) return
+
+        val camera = latestCameraBitmap ?: return
+        val screen = displayedScreenBitmap ?: return
+
+        if (camera.isRecycled || screen.isRecycled) return
+
+        val output = Bitmap.createBitmap(1280, 720, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(output)
+        canvas.drawColor(Color.BLACK)
+
+        val paint = Paint(Paint.FILTER_BITMAP_FLAG)
+
+        drawFitCenter(canvas, camera, Rect(0, 0, 640, 720), paint)
+        drawFitCenter(canvas, screen, Rect(640, 0, 1280, 720), paint)
+
+        val old = displayedCompositeBitmap
+        displayedCompositeBitmap = output
+        compositeView.setImageBitmap(output)
+
+        if (old != null && old !== output && !old.isRecycled) {
+            old.recycle()
+        }
+    }
+
+    private fun drawFitCenter(
+        canvas: Canvas,
+        bitmap: Bitmap,
+        area: Rect,
+        paint: Paint
+    ) {
+        val scale = minOf(
+            area.width().toFloat() / bitmap.width,
+            area.height().toFloat() / bitmap.height
+        )
+
+        val width = (bitmap.width * scale).toInt()
+        val height = (bitmap.height * scale).toInt()
+
+        val left = area.left + (area.width() - width) / 2
+        val top = area.top + (area.height() - height) / 2
+
+        val destination = Rect(left, top, left + width, top + height)
+        canvas.drawBitmap(bitmap, null, destination, paint)
     }
 
     private fun requestScreenCapture() {
@@ -425,7 +507,20 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         ScreenFrameBus.clear()
+        CameraFrameBus.onFrame = null
+
         screenView.setImageDrawable(null)
+        compositeView.setImageDrawable(null)
+
+        latestCameraBitmap?.let {
+            if (!it.isRecycled) it.recycle()
+        }
+        latestCameraBitmap = null
+
+        displayedCompositeBitmap?.let {
+            if (!it.isRecycled) it.recycle()
+        }
+        displayedCompositeBitmap = null
 
         displayedScreenBitmap?.let {
             if (!it.isRecycled) it.recycle()
