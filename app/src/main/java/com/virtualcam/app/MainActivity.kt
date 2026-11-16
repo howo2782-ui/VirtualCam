@@ -119,7 +119,7 @@ class MainActivity : ComponentActivity() {
                 screenFrameCount++
                 val now = android.os.SystemClock.elapsedRealtime()
                 if (now - lastScreenLogTime >= 1000) {
-                    android.util.Log.d("VirtualCam", "Screen frames received: $screenFrameCount")
+                    status.text = "إطارات الشاشة في الثانية: $screenFrameCount"
                     screenFrameCount = 0
                     lastScreenLogTime = now
                 }
